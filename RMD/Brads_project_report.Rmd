@@ -1,0 +1,391 @@
+---
+output:
+  word_document: 
+    reference_docx: margin_styles.docx
+params:
+    STREAM_NAME: 
+      value: "Alpowa"
+---
+
+```{r data_import&clean, message=FALSE, warning=FALSE, include=FALSE}
+# INSTRUCTIONS: Enter "Alpowa", "Deadman", or "Pataha" above in the value parameter for stream name based on which stream you want to generate your report for before knitting.
+
+# load libraries
+library(tidyverse)
+library(readxl)
+library(ggpubr)
+library(knitr)
+library(rstatix)
+library(flextable)
+
+# set STREAM_NAME variable equal to stream name above in params
+STREAM_NAME = params$STREAM_NAME
+
+# Read in data
+alpowa <-  read_excel("R:/_04_Project_Data/R/VSP/Data/Alpowa_Creek_Temp_Flow.csv", sheet=3)
+
+deadman <- read_excel("P:/Research_and_Monitoring/_04_Project_Data/PCD_RM_scripts/data/Brads_project_data/Deadman_Creek_flow_and_temp.xlsx", sheet=3)
+
+pataha <- read_excel("P:/Research_and_Monitoring/_04_Project_Data/PCD_RM_scripts/data/Brads_project_data/Pataha_flow_and_temp.xlsx", sheet=3)
+
+# if statement to pick which data to use based on stream name or call you loser
+if (STREAM_NAME == 'Alpowa'){
+  ECY_DATA <- alpowa
+} else if (STREAM_NAME == 'Deadman'){
+  ECY_DATA <- deadman
+} else if (STREAM_NAME == 'Pataha'){
+  ECY_DATA <- pataha
+} else{print("Enter a Valid Stream Name Loser")}
+
+# setting TEMP and Q data frames
+TEMP <- ECY_DATA[,c(1,3)]
+Q <- ECY_DATA[,c(1,2)]
+
+# Cleaning Q
+Q$Month = format(as.Date(Q$Date), "%m")
+Q$Month = as.numeric(Q$Month)
+SUMMER_Q = Q[Q$Month > 5 & Q$Month < 10,]
+SUMMER_Q = SUMMER_Q[!is.na(SUMMER_Q$Flow),]
+SUMMER_Q$Year = format(as.Date(SUMMER_Q$Date), "%Y") 
+SUMMER_Q$Group = NA
+
+for(i in 1:nrow(SUMMER_Q)){
+  if(SUMMER_Q$Year[i] < 2012){
+    SUMMER_Q$Group[i] = "Pre-2011"
+  }
+  else{SUMMER_Q$Group[i] = "Post-2011"}
+}
+colnames(SUMMER_Q) = c("Date", "Value", "Month", "Year", "Group")
+
+# Cleaning Temp
+TEMP$Year = format(as.Date(TEMP$Date), "%Y")
+TEMP$Month = format(as.Date(TEMP$Date), "%m")
+TEMP$Month = as.numeric(TEMP$Month)
+TEMP = TEMP %>% drop_na(`Water Temp`)
+TEMP = TEMP[!is.na(TEMP$`Water Temp`),]
+TEMP$Group = NA
+for(i in 1:nrow(TEMP)){
+  if(TEMP$Year[i] < 2012){
+    TEMP$Group[i] = "Pre-2011"
+  }
+  else{
+    TEMP$Group[i] = "Post-2011"
+  }
+}
+
+colnames(TEMP) = c("Date", "Value","Year", "Month", "Group")
+```
+<center>
+![](P:/Research_and_Monitoring/_04_Project_Data/Water_Quality/_2_R_Scripts/WQM_Markdown/PCD.png){#id .class width=75 height=90px}
+</center>
+# `r STREAM_NAME` Creek Streamflow and Temperature Statistical Analysis
+</center>
+
+This report was created by the Palouse Conservation District (PCD) and contains a statistical analysis to determine the presence of significant differences in summer streamflow and water temperature values pre and post 2011 in `r STREAM_NAME` Creek. For more information, please contact Ryan Boylan at RyanB@PalouseCD.org or Gerrit Bass at GerritB@PalouseCD.org. For more information about the program, visit PCD's Research and Monitoring website, https://www.palousecd.org/research-and-monitoring.
+
+# Streamflow Analysis
+
+## Monthly Average Summer Streamflows
+
+This graph displays the average monthly streamflow for the summer months both before and after 2011.
+
+``` {r Q_graph, echo = FALSE, message = FALSE, warning = FALSE}
+
+# create graph of monthly average flow before and after 2011
+Q_graph <- SUMMER_Q %>% 
+  mutate(Month = factor(month.abb[Month], levels = month.abb)) %>% # change numeric values for months to abbreviated Month names for display on graph 
+  group_by(Month, Group) %>% #group data based on month and before/after 2011
+  summarize(avg_monthly_flow = mean(Value)) %>% #take the average of each group
+  ggplot(aes(x = Month, y = avg_monthly_flow, color = Group, group = Group))+
+  geom_point(size = 3, stat='summary', fun.y = sum)+ #stat and fun.y are to set up stat summary so points can be connected despite being discrete data
+  stat_summary(fun.y = sum, geom = "line", size = 1)+ # use instead of geom_line since data is discrete
+  scale_color_manual(values=c("#E69F00", "#56B4E9"))+
+  labs(y = 'Average Monthly Streamflow (cfs)')+
+  theme_minimal()
+
+Q_graph
+
+```
+
+\newpage
+
+## Histogram of Streamflow
+
+Graphing a histogram is a good way to start visualizing the distribution of a data set. It gives us an idea of if the data has a normal distribution and helps us visualize any differences in data pre and post 2011. 
+
+```{r Q_histogram, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+Q_hist<-ggplot(SUMMER_Q, aes(x= Value, color= Group)) +
+  geom_histogram(fill="white", position="dodge")+ # position helps to display spots where before and after 2011 overlap
+  scale_color_manual(values=c("#E69F00", "#56B4E9"))+
+  theme(legend.position="top")+
+  labs(x = "Streamflow (cfs)")
+Q_hist
+
+```
+
+\newpage
+
+## Q-Q Plot
+
+A Q-Q plot, or quantile-quantile plot, is another way to visualize the distribution of a data set. The deviation of streamflow from the line displayed in the figure below indicates a lack of normality in the data. Knowing this helps us decide which statistical tests are relevant for the data. 
+
+```{r Q_qqplots, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+ggqqplot(SUMMER_Q, x = "Value",
+         ggtheme = theme_pubclean())+
+  labs(title = "Streamflow (cfs)")
+
+```
+
+## Shapiro Test of Streamflow
+
+The Shapiro Test is a test of normality to aid in deciding what statistical test should be used. P-values greater than 0.05 represent normal data distribution, while values less than 0.05 assume a non-normal distribution.
+
+``` {r Q_shapiro_test, echo = FALSE, message = FALSE, warning = FALSE}
+shapiro_Q <- shapiro_test(SUMMER_Q$Value) %>% # preform shapiro test
+  select(-1) %>%  #remove unneeded columns from table
+  rename('p-value' = 'p.value') %>% 
+  add_column( "Is Data Normal?" = if_else(.$`p-value` > 0.05, "YES", "NO")) %>% # add a column that states normality based on p-value
+  flextable() %>% #make a pretty table
+  set_formatter(`p-value` = function(x) {
+    formatC(x, format = "e", digits = 3)
+  }) %>% # force p-value into scientific notation
+  set_formatter( statistic = function(x){
+    formatC(x, digits = 3) # limit values to 3 decimal points
+  }) %>% 
+  width(width = 1) %>% # set column width
+  align(j = 3, align ='center', part = 'all') # center the last column
+
+shapiro_Q
+
+```
+
+\newpage
+
+## Streamflow Statistical Analysis
+
+Below are the statistical parameters for summer streamflow in `r STREAM_NAME` Creek before and after 2011. Count is the the number of observations in each group. Variance and standard deviation (sd) are both measures of how spread out the data is. The mean of a dataset is found by adding up all values and dividing by the toal number of values, while the median is the middle number in a dataset, when the data is ordered from smallest to largest. If a dataset is non-normal, the mean, also known as the average, is a better value to use than the median. Inerquartile Range (IQR) is the distance from 25 percentile of the data to the 75th percentile of the data and is a measure of where the majority of the data lies from the mean. A smaller IQR means more tighly grouped data and visa versa.
+
+```{r Q_stats, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Stats summary
+group_by(SUMMER_Q, Group) %>%
+  summarise(count = n(),
+            variance = var(Value, na.rm = TRUE),
+            mean = mean(Value, na.rm=TRUE),
+            sd = sd(Value, na.rm=TRUE),
+            median = median(Value, na.rm=TRUE),
+            IQR = IQR(Value, na.rm=TRUE)
+  ) %>% 
+  flextable() %>% 
+  colformat_double(digits = 2) %>% # rounds values to 2 decimal points
+  autofit()
+```
+
+## Streamflow Boxplots
+
+Boxplots allow us to visualize the data displayed in the table above. The thick line in the middle of the box is the Median value and the lines that form the outside of the box are the 25th and 75th percentile of the data. The "whiskers" or lines coming out of the boxes extend to the minimum and maximum values and the dots represent any values classified as outliers. 
+
+``` {r Q_boxplot, echo = FALSE, message = FALSE, warning = FALSE}
+
+box_Q <- ggplot(SUMMER_Q, aes(x = Group, y = Value, fill = Group ))+
+  geom_boxplot()+
+  scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+  theme_classic()+
+  labs(x = '',y = 'Streamflow (cfs)')+
+  theme(legend.position="none") 
+
+box_Q
+
+```
+
+\newpage
+
+``` {r kruskal_for_Q, echo=F, message=F, warning=F}
+kruskal_q <- kruskal_test(Value ~ Group, data = SUMMER_Q) %>%
+  select(-1,-6) %>% #remove unneeded columns 
+  rename('p-value' = 'p') %>% 
+  add_column( "Is there a Statistical Difference?" = if_else(.$`p-value` < 0.05, "YES", "NO"))# add a column that states stat difference based on p-value
+
+
+# save a variable to print in rmd file based on answer to stat diff question  
+kruskal_q_statement <- ifelse(kruskal_q$`Is there a Statistical Difference?` == "YES","This analaysis indicates there is a statistically significant difference between pre and post-2011 data.",
+                                 "This analaysis indicates there is not a statistically significant difference between pre and post-2011 data.")
+```
+
+## Kruskal-Wallis Test
+
+The Kruskal-Wallis test is used to check for statistical differences between pre and post-2011 streamflow. It assumes a non-normal distribution and a p-value less than 0.05, in this test, represents a statistical difference between sample groups. The statistic value in the table below is the Kruskal-Wallis rank sum statistic that is used to compute the p-value.
+
+\n
+
+**`r kruskal_q_statement`** 
+
+``` {r kruskal_for_Q_table, echo=F, message=F, warning=F}
+
+#plot as fextable
+kruskal_q %>% 
+flextable() %>% #make pretty table
+set_formatter(`p-value` = function(x) {
+  formatC(x, format = "e", digits = 3)
+}) %>% # force pvalue to sci notation
+set_formatter( statistic = function(x){
+  formatC(x, digits = 3)}) %>% # limit table to 3 decimal points
+width(width = 1) %>% # set column width
+align( align ='center', part = 'all') # center the last column
+```
+
+\newpage
+
+# Water Temperature Analysis
+
+## Monthly Average Water Temperature
+
+This graph displays the average monthly water temperature for pre and post-2011 temperature data.
+
+``` {r temp_graph, echo = FALSE, message = FALSE, warning = FALSE}
+
+# Creates graph of monthly mean temperatures before and after 2011
+temp_graph <- TEMP %>% # see streamflow graph above for line by line explanation of code
+  mutate(Month = factor(month.abb[Month], levels = month.abb)) %>% 
+  group_by(Month, Group) %>% 
+  summarize(avg_monthly_temp = mean(Value)) %>% 
+  ggplot(aes(x = Month, y = avg_monthly_temp, group = Group, color = Group))+
+  geom_point(size = 3, stat='summary', fun.y = sum)+
+  stat_summary(fun.y = sum, geom = "line", size = 1)+
+  scale_color_manual(values=c("#E69F00", "#56B4E9"))+
+  labs(y = 'Average Monthly Water Temperature (degC)')+
+  theme_minimal()
+
+temp_graph
+
+```
+
+\newpage
+
+## Histogram of Water Temperature
+
+Graphing a histogram is a good way to start visualizing the distribution of a data set. It gives us an idea of if the data has a normal distribution and helps us visualize any differences in data pre and post 2011. 
+
+```{r temp_histogram, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+temp_hist<-ggplot(TEMP, aes(x= Value, color= Group)) +
+  geom_histogram(fill="white", position="dodge")+
+  scale_color_manual(values=c("#E69F00", "#56B4E9"))+
+  theme(legend.position="top")+
+  labs(x = "Stream Temperature (degC)")
+temp_hist
+
+```
+
+\newpage
+
+## Q-Qplot of Stream Temperature
+
+A Q-Q plot, or quantile-quantile plot, is another way to visualize the distribution of a data set. The deviation of streamflow from the line displayed in the figure below indicates a lack of normality in the data. Knowing this helps us decide which statistical tests are relevant for the data. 
+
+```{r temp_qqplots, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+ggqqplot(TEMP, x = "Value",
+         ggtheme = theme_pubclean())+
+  labs(title = "Stream Temperature (degC)")
+
+```
+
+## Shapiro Test For Stream Temperature
+
+The Shapiro Test is a test of normality to aid in deciding what statistical test should be used.A p-value greater than 0.05 represents a normal data distribution, while values less than 0.05 assume a non-normal distribution.
+
+``` {r temp_shapiro_test, echo = FALSE, message = FALSE, warning = FALSE, paged.print = TRUE, resutls = 'asis' }
+shapiro_temp <- shapiro_test(TEMP$Value[0:5000]) %>% # preform shapiro test
+  select(-1) %>%  #remove unneeded columns from table
+  rename('p-value' = 'p.value') %>% 
+  add_column( "Is Data Normal?" = if_else(.$`p-value` > 0.05, "YES", "NO")) %>% # add a column that states normality based on p-value
+  flextable() %>% #make a pretty table
+  set_formatter(`p-value` = function(x) {
+    formatC(x, format = "e", digits = 3)
+  }) %>% # force p-value into scientific notation
+  set_formatter( statistic = function(x){
+    formatC(x, digits = 3) # limit values to 3 decimal points
+  }) %>% 
+  width(width = 1) %>% # set column width
+  align(j = 3, align ='center', part = 'all') # center the last column
+
+shapiro_temp
+
+```
+
+\newpage
+
+## Water Temperature Statistical Analysis
+
+Below are the statistical parameters for water temperature in `r STREAM_NAME` Creek before and after 2011. Count is the the number of observations in each group. Variance and standard deviation (sd) are both measures of how spread out the data is. The mean of a dataset is found by adding up all values and dividing by the toal number of values, while the median is the middle number in a dataset, when the data is ordered from smallest to largest. If a dataset is non-normal, the mean, also known as the average, is a better value to use than the median. Inerquartile Range (IQR) is the distance from 25 percentile of the data to the 75th percentile of the data and is a measure of where the majority of the data lies from the mean. A smaller IQR means more tightly grouped data and visa versa. 
+
+```{r temp_stats, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Stats for temp
+group_by(TEMP, Group) %>%
+  summarise(count = n(),
+            variance = var(Value, na.rm = TRUE),
+            mean = mean(Value, na.rm=TRUE),
+            sd = sd(Value, na.rm=TRUE),
+            median = median(Value, na.rm=TRUE),
+            IQR = IQR(Value, na.rm=TRUE)
+  ) %>% 
+  flextable() %>% 
+  colformat_double(digits = 2) %>% 
+  autofit()
+```
+
+## Water Temperature Boxplots
+
+Boxplots allow us to visualize the data displayed in the table above. The thick line in the middle of the box is the Median value and the lines that form the outside of the box are the 25th and 75th percentile of the data. The "whiskers" or lines coming out of the boxes extend to the minimum and maximum values and the dots represent any values classified as outliers. 
+
+
+``` {r flow_boxplot, echo = FALSE, message = FALSE, warning = FALSE}
+
+box_temp <- ggplot(TEMP, aes(x = Group, y = Value, fill = Group ))+
+  geom_boxplot()+
+  scale_fill_manual(values=c("#E69F00", "#56B4E9"))+
+  theme_classic()+
+  labs(x = '',y = 'Water Temperature (degC)')+
+  theme(legend.position="none") 
+
+box_temp
+
+```
+
+\newpage
+
+``` {r kruskal_for_temp, echo=F, message=F, warning=F}
+
+kruskal_temp <- kruskal_test(Value ~ Group, data = TEMP) %>%
+  select(-1,-6) %>% #remove unneeded colums 
+  rename('p-value' = 'p') %>% 
+  add_column( "Is there a Statistical Difference?" = if_else(.$`p-value` < 0.05, "YES", "NO"))# add a column that states stat difference based on p-value
+
+
+# save a variable to print in rmd file based on answer to stat diff question  
+kruskal_temp_statement <- ifelse(kruskal_temp$`Is there a Statistical Difference?` == "YES","This analaysis indicates there is a statistically significant difference between pre and post-2011 data.",
+                                 "This analaysis indicates there is not a statistically significant difference between pre and post-2011 data.")
+```
+
+## Kruskal-Wallis Test
+
+The Kruskal-Wallis test is used to check for statistical differences between pre and post-2011 water temperatures. It assumes a non-normal distribution and a p-value less than 0.05, in this test, represents a statistical difference between sample groups. The statistic value in the table below is the Kruskal-Wallis rank sum statistic that is used to compute the p-value.
+
+\n
+
+**`r kruskal_temp_statement`** 
+
+``` {r kruskal_for_temp_table,results = 'asis', echo=F, message=F, warning=F}
+
+#plot as fextable
+kruskal_temp %>% 
+flextable() %>% #make pretty table
+set_formatter(`p-value` = function(x) {
+  formatC(x, format = "e", digits = 3)
+}) %>% # force pvalue to sci notation
+set_formatter( statistic = function(x){
+  formatC(x, digits = 3)}) %>% # limit table to 3 decimal points
+width(width = 1) %>% # set column width
+align( align ='center', part = 'all') # center the last column
+
+```
